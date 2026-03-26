@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ScatterChart, Scatter, ZAxis } from "recharts";
+import { BarcodeDetector as BarcodeDetectorPolyfill } from "barcode-detector";
 
 const STORAGE_KEY = "fitness_logs_v3";
 const BODY_PARTS = ["胸", "背中", "脚", "肩", "腕", "腹", "全身"];
@@ -176,11 +177,10 @@ function BarcodeModal({ onDetected, onClose }) {
   const detectorRef = useRef(null);
   const rafRef = useRef(null);
   const [status, setStatus] = useState("カメラ起動中...");
-  const [ok, setOk] = useState(true);
 
   useEffect(() => {
-    if (!("BarcodeDetector" in window)) { setOk(false); setStatus("Safari/Chrome推奨"); return; }
-    detectorRef.current = new window.BarcodeDetector({ formats: ["ean_13","ean_8","upc_a","upc_e","code_128","code_39"] });
+    const DetectorClass = ("BarcodeDetector" in window) ? window.BarcodeDetector : BarcodeDetectorPolyfill;
+    detectorRef.current = new DetectorClass({ formats: ["ean_13","ean_8","upc_a","upc_e","code_128","code_39"] });
     navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
       .then((stream) => {
         streamRef.current = stream;
@@ -208,18 +208,14 @@ function BarcodeModal({ onDetected, onClose }) {
           <div style={{ fontFamily:"'DM Mono',monospace", color:"#c8f080", fontSize:14 }}>バーコードスキャン</div>
           <button onClick={onClose} style={{ background:"none", border:"1px solid #333", color:"#888", borderRadius:6, padding:"4px 14px", cursor:"pointer" }}>閉じる</button>
         </div>
-        {ok ? (
-          <div style={{ position:"relative", background:"#000", borderRadius:14, overflow:"hidden", aspectRatio:"4/3" }}>
-            <video ref={videoRef} style={{ width:"100%", height:"100%", objectFit:"cover" }} muted playsInline />
-            <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
-              <div style={{ width:"72%", height:"28%", border:"2px solid #c8f080", borderRadius:8, boxShadow:"0 0 0 9999px rgba(0,0,0,0.45)", overflow:"hidden" }}>
-                <div style={{ height:2, background:"linear-gradient(90deg,transparent,#c8f080,transparent)", animation:"scan 1.8s ease-in-out infinite", marginTop:"50%" }} />
-              </div>
+        <div style={{ position:"relative", background:"#000", borderRadius:14, overflow:"hidden", aspectRatio:"4/3" }}>
+          <video ref={videoRef} style={{ width:"100%", height:"100%", objectFit:"cover" }} muted playsInline />
+          <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
+            <div style={{ width:"72%", height:"28%", border:"2px solid #c8f080", borderRadius:8, boxShadow:"0 0 0 9999px rgba(0,0,0,0.45)", overflow:"hidden" }}>
+              <div style={{ height:2, background:"linear-gradient(90deg,transparent,#c8f080,transparent)", animation:"scan 1.8s ease-in-out infinite", marginTop:"50%" }} />
             </div>
           </div>
-        ) : (
-          <div style={{ background:"#111318", borderRadius:12, padding:48, textAlign:"center", fontSize:48 }}>📷</div>
-        )}
+        </div>
         <div style={{ marginTop:12, fontSize:12, color:"#666", textAlign:"center" }}>{status}</div>
       </div>
     </div>
