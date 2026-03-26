@@ -5,6 +5,8 @@ import { BarcodeDetector as BarcodeDetectorPolyfill } from "barcode-detector";
 const STORAGE_KEY = "fitness_logs_v3";
 const BODY_PARTS = ["胸", "背中", "脚", "肩", "腕", "腹", "全身"];
 const CUSTOM_EX_KEY = 'custom_exercises';
+const FOOD_DB_KEY = 'food_database_v1';
+const COPIED_MEAL_KEY = 'copied_meal_v1';
 const PRESET_EXERCISES = {
   胸:  ['ベンチプレス','インクラインベンチプレス','ダンベルフライ','ケーブルクロスオーバー','ディップス'],
   背中: ['デッドリフト','懸垂','ラットプルダウン','シーテッドロウ','ワンハンドロウ','Tバーロウ'],
@@ -300,21 +302,121 @@ function NutritionCameraModal({ onDetected, onClose }) {
   );
 }
 
-function AddMealModal({ onAdd, onClose, presetTime, mealHistory }) {
+// ── Food Register Modal ────────────────────────────────────────────
+function FoodRegisterModal({ initialData, onSave, onCancel }) {
+  const [form, setForm] = useState({
+    name:       initialData?.name        || "",
+    barcode:    initialData?.barcode     || "",
+    baseAmount: initialData?.baseAmount != null ? String(initialData.baseAmount) : "100",
+    baseUnit:   initialData?.baseUnit    || "g",
+    calories:   initialData?.calories != null ? String(initialData.calories) : "",
+    protein:    initialData?.protein  != null ? String(initialData.protein)  : "",
+    fat:        initialData?.fat      != null ? String(initialData.fat)      : "",
+    carbs:      initialData?.carbs    != null ? String(initialData.carbs)    : "",
+  });
+  const handleSave = () => {
+    if (!form.name.trim() || !form.baseAmount) return;
+    onSave({
+      id: Date.now(),
+      name:       form.name.trim(),
+      barcode:    form.barcode || null,
+      baseAmount: parseFloat(form.baseAmount) || 100,
+      baseUnit:   form.baseUnit || "g",
+      calories:   parseFloat(form.calories) || 0,
+      protein:    parseFloat(form.protein)  || 0,
+      fat:        parseFloat(form.fat)      || 0,
+      carbs:      parseFloat(form.carbs)    || 0,
+    });
+  };
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.92)", zIndex:1200, display:"flex", alignItems:"flex-end" }}>
+      <div style={{ width:"100%", background:"#0f1015", borderRadius:"18px 18px 0 0", padding:"20px 20px 40px", border:"1px solid #1c1c24", maxHeight:"92vh", overflowY:"auto" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+          <div style={{ fontFamily:"'DM Mono',monospace", color:"#c8f080", fontSize:14 }}>食品を登録</div>
+          <button onClick={onCancel} style={{ background:"none", border:"none", color:"#555", fontSize:22, cursor:"pointer" }}>×</button>
+        </div>
+        <div style={{ fontSize:11, color:"#555", marginBottom:16 }}>登録すると次回から自動入力できます</div>
+        <div style={{ marginBottom:12 }}>
+          <div style={ls}>食品名</div>
+          <input className="fi" placeholder="例: サラダチキン プレーン" value={form.name} onChange={e => setForm(f=>({...f,name:e.target.value}))} autoFocus />
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:10, marginBottom:12 }}>
+          <div>
+            <div style={ls}>基準量（数字のみ）</div>
+            <input className="fi" type="number" placeholder="100" value={form.baseAmount} onChange={e => setForm(f=>({...f,baseAmount:e.target.value}))} />
+          </div>
+          <div>
+            <div style={ls}>単位</div>
+            <input className="fi" placeholder="g" value={form.baseUnit} onChange={e => setForm(f=>({...f,baseUnit:e.target.value}))} />
+          </div>
+        </div>
+        <div style={{ fontSize:11, color:"#666", marginBottom:10 }}>↑ 例: 100・g、1・個、1・食</div>
+        <div style={{ marginBottom:20 }}>
+          <div style={{ fontSize:12, color:"#888", marginBottom:8 }}>栄養成分（基準量あたり）</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+            {[["calories","カロリー (kcal)","#f0c060"],["protein","P タンパク質 (g)","#c8f080"],["fat","F 脂質 (g)","#f0b050"],["carbs","C 炭水化物 (g)","#60a8f0"]].map(([key,label,color]) => (
+              <div key={key}>
+                <div style={{...ls, color}}>{label}</div>
+                <input className="fi" type="number" placeholder="0" value={form[key]} onChange={e => setForm(f=>({...f,[key]:e.target.value}))} />
+              </div>
+            ))}
+          </div>
+        </div>
+        <button className="save-btn" onClick={handleSave} style={{ marginBottom:10 }}>登録する</button>
+        <button onClick={onCancel} style={{ width:"100%", background:"none", border:"1px solid #222", borderRadius:8, padding:13, color:"#555", cursor:"pointer", fontSize:14 }}>キャンセル</button>
+      </div>
+    </div>
+  );
+}
+
+function AddMealModal({ onAdd, onClose, presetTime, mealHistory, foodDb, onSaveFoodDb }) {
   const [meal, setMeal] = useState({ time: presetTime || new Date().toTimeString().slice(0,5), name:"", calories:"", protein:"", fat:"", carbs:"", amount:"" });
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [showScanner, setShowScanner] = useState(false);
   const [showNutritionCam, setShowNutritionCam] = useState(false);
+  const [selectedDbFood, setSelectedDbFood] = useState(null);
+  const [amountNum, setAmountNum] = useState("");
+  const [showRegister, setShowRegister] = useState(false);
+  const [registerInitial, setRegisterInitial] = useState(null);
 
+  // サジェスト: 個人DBを優先、次に履歴
   useEffect(() => {
     if (!query.trim()) { setSuggestions([]); return; }
     const q = query.toLowerCase();
-    const matched = mealHistory.filter(m => m.name.toLowerCase().includes(q)).slice(0, 5);
-    setSuggestions(matched);
-  }, [query, mealHistory]);
+    const dbMatches  = (foodDb || []).filter(f => f.name.toLowerCase().includes(q));
+    const histMatches = mealHistory.filter(m => m.name.toLowerCase().includes(q) && !dbMatches.find(d => d.name === m.name));
+    setSuggestions([...dbMatches.slice(0,4).map(f=>({...f,_fromDb:true})), ...histMatches.slice(0,2)]);
+  }, [query, mealHistory, foodDb]);
+
+  // 数量変更時にPFCを自動計算
+  useEffect(() => {
+    if (!selectedDbFood) return;
+    const num = parseFloat(amountNum);
+    if (!num || !selectedDbFood.baseAmount) return;
+    const scale = num / selectedDbFood.baseAmount;
+    const r = (v) => String(Math.round(v * scale * 10) / 10);
+    setMeal(m => ({
+      ...m,
+      calories: r(selectedDbFood.calories),
+      protein:  r(selectedDbFood.protein),
+      fat:      r(selectedDbFood.fat),
+      carbs:    r(selectedDbFood.carbs),
+      amount:   `${amountNum}${selectedDbFood.baseUnit}`,
+    }));
+  }, [amountNum, selectedDbFood]);
+
+  const applyDbFood = (dbFood, customAmountNum) => {
+    setSelectedDbFood(dbFood);
+    setQuery(dbFood.name);
+    setMeal(m => ({ ...m, name: dbFood.name }));
+    setAmountNum(customAmountNum != null ? String(customAmountNum) : String(dbFood.baseAmount));
+    setSuggestions([]);
+  };
 
   const applyHistory = (h) => {
+    setSelectedDbFood(null);
+    setAmountNum("");
     setMeal(m => ({ ...m, name: h.name, calories: h.calories, protein: h.protein, fat: h.fat, carbs: h.carbs, amount: h.amount }));
     setQuery(h.name);
     setSuggestions([]);
@@ -340,37 +442,46 @@ function AddMealModal({ onAdd, onClose, presetTime, mealHistory }) {
 
   const handleBarcodeDetected = async (code) => {
     setShowScanner(false);
-    setQuery(`検索中... (${code})`);
-    setMeal(m => ({...m, name: code}));
+    // 1. まず個人DBを検索
+    const dbMatch = (foodDb || []).find(f => f.barcode === code);
+    if (dbMatch) { applyDbFood(dbMatch); return; }
+    // 2. Open Food Facts APIを検索
+    setQuery(`検索中...`);
     try {
       const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`);
       const data = await res.json();
       if (data.status === 1 && data.product) {
         const p = data.product;
-        const name = p.product_name_ja || p.product_name || p.generic_name || code;
         const n = p.nutriments || {};
-        setQuery(name);
-        setMeal(m => ({
-          ...m,
-          name,
-          calories: n["energy-kcal_100g"] != null ? String(Math.round(n["energy-kcal_100g"])) : m.calories,
-          protein:  n.proteins_100g       != null ? String(Math.round(n.proteins_100g * 10) / 10) : m.protein,
-          fat:      n.fat_100g            != null ? String(Math.round(n.fat_100g * 10) / 10) : m.fat,
-          carbs:    n.carbohydrates_100g  != null ? String(Math.round(n.carbohydrates_100g * 10) / 10) : m.carbs,
-          amount:   "100gあたり",
-        }));
+        setRegisterInitial({
+          name:       p.product_name_ja || p.product_name || p.generic_name || "",
+          barcode:    code,
+          baseAmount: 100,
+          baseUnit:   "g",
+          calories:   n["energy-kcal_100g"] != null ? Math.round(n["energy-kcal_100g"]) : "",
+          protein:    n.proteins_100g       != null ? Math.round(n.proteins_100g * 10) / 10 : "",
+          fat:        n.fat_100g            != null ? Math.round(n.fat_100g * 10) / 10 : "",
+          carbs:      n.carbohydrates_100g  != null ? Math.round(n.carbohydrates_100g * 10) / 10 : "",
+        });
       } else {
-        setQuery(code);
-        setMeal(m => ({...m, name: code}));
+        setRegisterInitial({ barcode: code, name: "", baseAmount: 100, baseUnit: "g" });
       }
     } catch {
-      setQuery(code);
-      setMeal(m => ({...m, name: code}));
+      setRegisterInitial({ barcode: code, name: "", baseAmount: 100, baseUnit: "g" });
     }
+    setQuery("");
+    setShowRegister(true);
+  };
+
+  const handleRegisterSave = (newFood) => {
+    onSaveFoodDb(newFood);
+    applyDbFood(newFood);
+    setShowRegister(false);
   };
 
   if (showScanner) return <BarcodeModal onDetected={handleBarcodeDetected} onClose={() => setShowScanner(false)} />;
   if (showNutritionCam) return <NutritionCameraModal onDetected={handleNutritionDetected} onClose={() => setShowNutritionCam(false)} />;
+  if (showRegister) return <FoodRegisterModal initialData={registerInitial} onSave={handleRegisterSave} onCancel={() => { setShowRegister(false); setQuery(""); }} />;
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:1000, display:"flex", alignItems:"flex-end" }}>
@@ -387,11 +498,17 @@ function AddMealModal({ onAdd, onClose, presetTime, mealHistory }) {
 
         {/* 食品名 + バーコード */}
         <div style={{ marginBottom: suggestions.length ? 0 : 12, position:"relative" }}>
-          <div style={ls}>食品名</div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div style={ls}>食品名</div>
+            <button onClick={() => setShowRegister(true) || setRegisterInitial(null)}
+              style={{ background:"none", border:"none", color:"#555", fontSize:11, cursor:"pointer", marginBottom:6 }}>
+              ＋ 新規登録
+            </button>
+          </div>
           <div style={{ display:"flex", gap:8 }}>
-            <input className="fi" placeholder="例: ぞっこん WPIコーヒー風味"
+            <input className="fi" placeholder="食品名を入力 or バーコード読取"
               value={query}
-              onChange={e => { setQuery(e.target.value); setMeal(m=>({...m,name:e.target.value})); }}
+              onChange={e => { setQuery(e.target.value); setMeal(m=>({...m,name:e.target.value})); setSelectedDbFood(null); setAmountNum(""); }}
               style={{ flex:1 }} />
             <button onClick={() => setShowScanner(true)}
               title="バーコードで商品名を読み取る"
@@ -402,11 +519,17 @@ function AddMealModal({ onAdd, onClose, presetTime, mealHistory }) {
           {suggestions.length > 0 && (
             <div style={{ background:"#111318", border:"1px solid #2a2a36", borderRadius:"0 0 10px 10px", overflow:"hidden", marginBottom:12 }}>
               {suggestions.map((h, i) => (
-                <div key={i} onClick={() => applyHistory(h)}
+                <div key={i} onClick={() => h._fromDb ? applyDbFood(h) : applyHistory(h)}
                   style={{ padding:"10px 12px", cursor:"pointer", borderBottom:"1px solid #1c1c24", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                   <div>
-                    <div style={{ fontSize:13 }}>{h.name}</div>
-                    {h.amount && <div style={{ fontSize:11, color:"#555" }}>{h.amount}</div>}
+                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                      <span style={{ fontSize:13 }}>{h.name}</span>
+                      {h._fromDb && <span style={{ fontSize:9, background:"#1a2a1a", color:"#c8f080", border:"1px solid #2a5030", borderRadius:3, padding:"1px 5px" }}>DB</span>}
+                    </div>
+                    {h._fromDb
+                      ? <div style={{ fontSize:11, color:"#555" }}>{h.baseAmount}{h.baseUnit}あたり</div>
+                      : h.amount && <div style={{ fontSize:11, color:"#555" }}>{h.amount}</div>
+                    }
                   </div>
                   <div style={{ display:"flex", gap:4, flexShrink:0 }}>
                     {h.calories && <span className="pill"><span style={{color:"#f0c060",fontSize:10}}>kcal</span><span style={{color:"#aaa"}}>{h.calories}</span></span>}
@@ -418,25 +541,48 @@ function AddMealModal({ onAdd, onClose, presetTime, mealHistory }) {
           )}
         </div>
 
+        {/* 量の入力 */}
         <div style={{ marginBottom:12 }}>
-          <div style={ls}>量 (g / ml など)</div>
-          <input className="fi" placeholder="例: 30g, 1個, 100ml" value={meal.amount} onChange={e => setMeal(m=>({...m,amount:e.target.value}))} />
+          {selectedDbFood ? (
+            <>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div style={ls}>量</div>
+                <div style={{ fontSize:11, color:"#555", marginBottom:6 }}>基準: {selectedDbFood.baseAmount}{selectedDbFood.baseUnit} あたり</div>
+              </div>
+              <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                <input className="fi" type="number" placeholder={String(selectedDbFood.baseAmount)}
+                  value={amountNum}
+                  onChange={e => setAmountNum(e.target.value)}
+                  style={{ flex:1 }} />
+                <div style={{ background:"#1a1a2a", border:"1px solid #2a2a3a", borderRadius:8, padding:"9px 14px", color:"#7090c8", fontSize:14, flexShrink:0, fontFamily:"'DM Mono',monospace" }}>
+                  {selectedDbFood.baseUnit}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={ls}>量 (g / 個 など)</div>
+              <input className="fi" placeholder="例: 150g, 1個, 0.5食" value={meal.amount} onChange={e => setMeal(m=>({...m,amount:e.target.value}))} />
+            </>
+          )}
         </div>
 
-        {/* PFC + カメラスキャンボタン */}
+        {/* PFC */}
         <div style={{ marginBottom:10 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-            <div style={ls}>栄養成分</div>
+            <div style={ls}>栄養成分{selectedDbFood ? " (自動計算)" : ""}</div>
             <button onClick={() => setShowNutritionCam(true)}
               style={{ background:"#1a1a0a", border:"1px solid #4a4020", color:"#f0c060", borderRadius:8, padding:"6px 12px", fontSize:12, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
-              📷 栄養成分表示を撮影
+              📷 撮影して読取
             </button>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:20 }}>
             {[["calories","カロリー (kcal)","#f0c060"],["protein","P タンパク質 (g)","#c8f080"],["fat","F 脂質 (g)","#f0b050"],["carbs","C 炭水化物 (g)","#60a8f0"]].map(([key,label,color]) => (
               <div key={key}>
                 <div style={{...ls, color}}>{label}</div>
-                <input className="fi" type="number" placeholder="0" value={meal[key]} onChange={e => setMeal(m=>({...m,[key]:e.target.value}))} />
+                <input className="fi" type="number" placeholder="0" value={meal[key]}
+                  onChange={e => { setMeal(m=>({...m,[key]:e.target.value})); }}
+                  style={{ background: selectedDbFood ? "#0d1a0d" : undefined }} />
               </div>
             ))}
           </div>
@@ -708,9 +854,18 @@ export default function App() {
   const [showComplete, setShowComplete] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [customExercises, setCustomExercises] = useState({});
+  const [foodDb, setFoodDb] = useState([]);
+  const [copiedMeal, setCopiedMeal] = useState(null);
 
   useEffect(() => {
-    (async () => { try { const r = await window.storage.get(STORAGE_KEY); if (r) setLogs(JSON.parse(r.value)); const ce = await window.storage.get(CUSTOM_EX_KEY); if (ce) setCustomExercises(JSON.parse(ce.value)); } catch {} })();
+    (async () => {
+      try {
+        const r = await window.storage.get(STORAGE_KEY); if (r) setLogs(JSON.parse(r.value));
+        const ce = await window.storage.get(CUSTOM_EX_KEY); if (ce) setCustomExercises(JSON.parse(ce.value));
+        const fd = await window.storage.get(FOOD_DB_KEY); if (fd) setFoodDb(JSON.parse(fd.value));
+        const cm = await window.storage.get(COPIED_MEAL_KEY); if (cm) setCopiedMeal(JSON.parse(cm.value));
+      } catch {}
+    })();
   }, []);
 
   const saveLogs = useCallback(async (data) => { await window.storage.set(STORAGE_KEY, JSON.stringify(data)); }, []);
@@ -757,6 +912,25 @@ export default function App() {
 
   const addMeal = (meal) => setForm(f => ({ ...f, meals: [...f.meals, meal].sort((a,b) => a.time.localeCompare(b.time)) }));
   const removeMeal = (id) => setForm(f => ({ ...f, meals: f.meals.filter(m => m.id !== id) }));
+
+  const saveFoodToDb = async (newFood) => {
+    setFoodDb(prev => {
+      const updated = [...prev.filter(f => f.id !== newFood.id), newFood];
+      window.storage.set(FOOD_DB_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const copyMeal = (meal) => {
+    const toCopy = { ...meal };
+    setCopiedMeal(toCopy);
+    window.storage.set(COPIED_MEAL_KEY, JSON.stringify(toCopy));
+  };
+
+  const pasteMeal = (targetTime) => {
+    if (!copiedMeal) return;
+    addMeal({ ...copiedMeal, id: Date.now(), time: targetTime });
+  };
 
   const addExercise = () => {
     if (!newEx.name.trim()) return;
@@ -944,12 +1118,26 @@ export default function App() {
                                   <div style={{ fontSize:13, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{meal.name}</div>
                                   {meal.amount && <div style={{ fontSize:11, color:"#555" }}>{meal.amount}</div>}
                                 </div>
+                                <button
+                                  onClick={() => copyMeal(meal)}
+                                  title="コピー"
+                                  style={{ background: copiedMeal?.id === meal.id ? "#1a2a1a" : "none", border:"1px solid #2a2a36", color: copiedMeal?.id === meal.id ? "#c8f080" : "#555", borderRadius:4, padding:"3px 7px", fontSize:11, cursor:"pointer", flexShrink:0 }}>
+                                  📋
+                                </button>
                                 <button className="del-btn" onClick={()=>removeMeal(meal.id)}>×</button>
                               </div>
                             ))}
                           </div>
                         )}
-                        <button onClick={()=>setShowAddMeal(label)} style={{ background:"none", border:"none", color:"#2a3a4a", fontSize:14, cursor:"pointer", padding:"2px 0" }}>+</button>
+                        <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                          <button onClick={()=>setShowAddMeal(label)} style={{ background:"none", border:"none", color:"#2a3a4a", fontSize:14, cursor:"pointer", padding:"2px 0" }}>+</button>
+                          {copiedMeal && (
+                            <button onClick={() => pasteMeal(label)}
+                              style={{ background:"#111a11", border:"1px solid #2a3a2a", color:"#6a8a5a", borderRadius:6, padding:"2px 8px", fontSize:11, cursor:"pointer" }}>
+                              📋 {copiedMeal.name.length > 8 ? copiedMeal.name.slice(0,8)+"…" : copiedMeal.name} をペースト
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -1133,7 +1321,7 @@ export default function App() {
         )}
       </div>
 
-      {showAddMeal !== null && <AddMealModal onAdd={addMeal} onClose={()=>setShowAddMeal(null)} presetTime={showAddMeal} mealHistory={mealHistory} />}
+      {showAddMeal !== null && <AddMealModal onAdd={addMeal} onClose={()=>setShowAddMeal(null)} presetTime={showAddMeal} mealHistory={mealHistory} foodDb={foodDb} onSaveFoodDb={saveFoodToDb} />}
       {/* Toast notification */}
       {saved && <div className="toast">✓ トレーニングを保存しました</div>}
 
