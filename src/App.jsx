@@ -7,6 +7,23 @@ const BODY_PARTS = ["胸", "背中", "脚", "肩", "腕", "腹", "全身"];
 const CUSTOM_EX_KEY = 'custom_exercises';
 const FOOD_DB_KEY = 'food_database_v1';
 const COPIED_MEAL_KEY = 'copied_meal_v1';
+
+// window.storage (Cowork) が使えない場合は localStorage にフォールバック
+const appStorage = {
+  get: async (key) => {
+    try {
+      if (window.storage) { const r = await window.storage.get(key); return r ? r.value : null; }
+    } catch {}
+    try { return localStorage.getItem(key); } catch {}
+    return null;
+  },
+  set: async (key, value) => {
+    try {
+      if (window.storage) { await window.storage.set(key, value); return; }
+    } catch {}
+    try { localStorage.setItem(key, value); } catch {}
+  },
+};
 const PRESET_EXERCISES = {
   胸:  ['ベンチプレス','インクラインベンチプレス','ダンベルフライ','ケーブルクロスオーバー','ディップス'],
   背中: ['デッドリフト','懸垂','ラットプルダウン','シーテッドロウ','ワンハンドロウ','Tバーロウ'],
@@ -860,15 +877,15 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await window.storage.get(STORAGE_KEY); if (r) setLogs(JSON.parse(r.value));
-        const ce = await window.storage.get(CUSTOM_EX_KEY); if (ce) setCustomExercises(JSON.parse(ce.value));
-        const fd = await window.storage.get(FOOD_DB_KEY); if (fd) setFoodDb(JSON.parse(fd.value));
-        const cm = await window.storage.get(COPIED_MEAL_KEY); if (cm) setCopiedMeal(JSON.parse(cm.value));
+        const r  = await appStorage.get(STORAGE_KEY);       if (r)  setLogs(JSON.parse(r));
+        const ce = await appStorage.get(CUSTOM_EX_KEY);     if (ce) setCustomExercises(JSON.parse(ce));
+        const fd = await appStorage.get(FOOD_DB_KEY);       if (fd) setFoodDb(JSON.parse(fd));
+        const cm = await appStorage.get(COPIED_MEAL_KEY);   if (cm) setCopiedMeal(JSON.parse(cm));
       } catch {}
     })();
   }, []);
 
-  const saveLogs = useCallback(async (data) => { await window.storage.set(STORAGE_KEY, JSON.stringify(data)); }, []);
+  const saveLogs = useCallback(async (data) => { await appStorage.set(STORAGE_KEY, JSON.stringify(data)); }, []);
 
   const handleSave = async () => {
     // 種目名が入力済みの場合は自動で追加してから保存
@@ -916,7 +933,7 @@ export default function App() {
   const saveFoodToDb = async (newFood) => {
     setFoodDb(prev => {
       const updated = [...prev.filter(f => f.id !== newFood.id), newFood];
-      window.storage.set(FOOD_DB_KEY, JSON.stringify(updated));
+      appStorage.set(FOOD_DB_KEY, JSON.stringify(updated));
       return updated;
     });
   };
@@ -924,7 +941,7 @@ export default function App() {
   const copyMeal = (meal) => {
     const toCopy = { ...meal };
     setCopiedMeal(toCopy);
-    window.storage.set(COPIED_MEAL_KEY, JSON.stringify(toCopy));
+    appStorage.set(COPIED_MEAL_KEY, JSON.stringify(toCopy));
   };
 
   const pasteMeal = (targetTime) => {
@@ -943,7 +960,7 @@ export default function App() {
   const addCustomExercise = async (part, name) => {
     setCustomExercises(prev => {
       const updated = { ...prev, [part]: [...(prev[part]||[]), name] };
-      window.storage.set(CUSTOM_EX_KEY, JSON.stringify(updated));
+      appStorage.set(CUSTOM_EX_KEY, JSON.stringify(updated));
       return updated;
     });
   };
