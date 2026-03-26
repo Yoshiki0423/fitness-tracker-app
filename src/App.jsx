@@ -338,7 +338,38 @@ function AddMealModal({ onAdd, onClose, presetTime, mealHistory }) {
     onClose();
   };
 
-  if (showScanner) return <BarcodeModal onDetected={(code) => { setShowScanner(false); setQuery(`商品コード: ${code}`); setMeal(m => ({...m, name:`商品コード: ${code}`})); }} onClose={() => setShowScanner(false)} />;
+  const handleBarcodeDetected = async (code) => {
+    setShowScanner(false);
+    setQuery(`検索中... (${code})`);
+    setMeal(m => ({...m, name: code}));
+    try {
+      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`);
+      const data = await res.json();
+      if (data.status === 1 && data.product) {
+        const p = data.product;
+        const name = p.product_name_ja || p.product_name || p.generic_name || code;
+        const n = p.nutriments || {};
+        setQuery(name);
+        setMeal(m => ({
+          ...m,
+          name,
+          calories: n["energy-kcal_100g"] != null ? String(Math.round(n["energy-kcal_100g"])) : m.calories,
+          protein:  n.proteins_100g       != null ? String(Math.round(n.proteins_100g * 10) / 10) : m.protein,
+          fat:      n.fat_100g            != null ? String(Math.round(n.fat_100g * 10) / 10) : m.fat,
+          carbs:    n.carbohydrates_100g  != null ? String(Math.round(n.carbohydrates_100g * 10) / 10) : m.carbs,
+          amount:   "100gあたり",
+        }));
+      } else {
+        setQuery(code);
+        setMeal(m => ({...m, name: code}));
+      }
+    } catch {
+      setQuery(code);
+      setMeal(m => ({...m, name: code}));
+    }
+  };
+
+  if (showScanner) return <BarcodeModal onDetected={handleBarcodeDetected} onClose={() => setShowScanner(false)} />;
   if (showNutritionCam) return <NutritionCameraModal onDetected={handleNutritionDetected} onClose={() => setShowNutritionCam(false)} />;
 
   return (
